@@ -29,74 +29,15 @@ SOFTWARE.
 #include <vector>
 #include <array>
 
-#include <leptrino/pCommon.h>
-#include <leptrino/rs_comm.h>
-#include <leptrino/pComResInternal.h>
-
-#include "rclcpp/rclcpp.hpp"
-#include "geometry_msgs/msg/wrench_stamped.hpp"
+#include "leptirno_force_torque.hpp"
 
 #define PRG_VER "Ver 2.0.0"
 
+//Debug calibration and output sensor
 #define DEBUG 1
 
-using namespace std::chrono_literals;
-using std::placeholders::_1;
-
-class LeptrinoNode : public rclcpp::Node
-{
-private:
-  rclcpp::Publisher<geometry_msgs::msg::WrenchStamped>::SharedPtr wrench_pub_;
-  rclcpp::TimerBase::SharedPtr timer_acquisition_;
-  rclcpp::TimerBase::SharedPtr timer_publisher_;
-
-  void App_Init();
-  void App_Close(rclcpp::Logger logger);
-  ULONG SendData(UCHAR *pucInput, USHORT usSize);
-  void GetProductInfo(rclcpp::Logger logger);
-  void GetLimit(rclcpp::Logger logger);
-  void SerialStart(rclcpp::Logger logger);
-  void SerialStop(rclcpp::Logger logger);
-
-  struct ST_SystemInfo
-  {
-    int com_ok;
-  };
-
-  struct FS_data
-  {
-    std::array<double, 3> force;
-    std::array<double, 3> moment;
-  };
-
-  UCHAR CommRcvBuff[256];
-  UCHAR CommSendBuff[1024];
-  UCHAR SendBuff[512];
-  double conversion_factor[FN_Num];
-
-  std::string serial_port_;
-  int g_rate = 1000;
-
-  void SensorAquistionCallback();
-  void PublisherCallback();
-
-  rclcpp::Parameter serial_port;
-
-public:
-  ST_R_DATA_GET_F *stForce;
-  ST_R_DATA_GET_F *grossForce;
-  ST_R_GET_INF *stGetInfo;
-  ST_R_LEP_GET_LIMIT *stGetLimit;
-  ST_SystemInfo gSys;
-  FS_data sensor_data;
-  FS_data offset;
-
-  LeptrinoNode();
-  ~LeptrinoNode();
-  void SensorCallback();
-  void init(rclcpp::Logger logger);
-  void SensorNormalize(rclcpp::Logger logger);
-};
+//to calibrate the offset of sensor 
+#define Calibration 1
 
 LeptrinoNode::LeptrinoNode() : Node("Leptrino")
 {
