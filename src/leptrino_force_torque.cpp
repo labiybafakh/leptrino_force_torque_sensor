@@ -22,7 +22,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -53,7 +52,7 @@ private:
 
   void App_Init();
   void App_Close(rclcpp::Logger logger);
-  ULONG SendData(UCHAR* pucInput, USHORT usSize);
+  ULONG SendData(UCHAR *pucInput, USHORT usSize);
   void GetProductInfo(rclcpp::Logger logger);
   void GetLimit(rclcpp::Logger logger);
   void SerialStart(rclcpp::Logger logger);
@@ -75,17 +74,19 @@ private:
   UCHAR SendBuff[512];
   double conversion_factor[FN_Num];
 
-  std::string serial_port;
+  std::string serial_port_;
   int g_rate = 1000;
 
   void SensorAquistionCallback();
   void PublisherCallback();
 
+  rclcpp::Parameter serial_port;
+
 public:
-  ST_R_DATA_GET_F* stForce;
-  ST_R_DATA_GET_F* grossForce;
-  ST_R_GET_INF* stGetInfo;
-  ST_R_LEP_GET_LIMIT* stGetLimit;
+  ST_R_DATA_GET_F *stForce;
+  ST_R_DATA_GET_F *grossForce;
+  ST_R_GET_INF *stGetInfo;
+  ST_R_LEP_GET_LIMIT *stGetLimit;
   ST_SystemInfo gSys;
   FS_data sensor_data;
   FS_data offset;
@@ -101,7 +102,8 @@ LeptrinoNode::LeptrinoNode() : Node("Leptrino")
 {
   wrench_pub_ = this->create_publisher<geometry_msgs::msg::WrenchStamped>("leptrino_force_torque", 5);
 
-  RCLCPP_INFO(this->get_logger(), "port %s", this->get_parameter("com_port"));
+  this->declare_parameter("com_port");
+  serial_port = this->get_parameter("com_port");
 
   if (!this->get_parameter("com_port", serial_port))
   {
@@ -109,14 +111,15 @@ LeptrinoNode::LeptrinoNode() : Node("Leptrino")
   }
   else
   {
-    RCLCPP_INFO(this->get_logger(), "Using serial port: %s", serial_port.c_str());
+    serial_port_ = serial_port.as_string();
+    RCLCPP_INFO(this->get_logger(), "Using serial port: %s", serial_port_.c_str());
   }
 
   LeptrinoNode::App_Init();
 
   if (gSys.com_ok == NG)
   {
-    RCLCPP_ERROR(this->get_logger(), "%s open failed\n", serial_port.c_str());
+    RCLCPP_ERROR(this->get_logger(), "%s open failed\n", serial_port_.c_str());
     exit(0);
   }
   else
@@ -133,7 +136,6 @@ LeptrinoNode::LeptrinoNode() : Node("Leptrino")
 
     timer_acquisition_ = this->create_wall_timer(1ms, std::bind(&LeptrinoNode::SensorCallback, this));
     timer_publisher_ = this->create_wall_timer(1ms, std::bind(&LeptrinoNode::PublisherCallback, this));
-
   }
 }
 
@@ -181,7 +183,7 @@ void LeptrinoNode::SensorCallback()
       auto rt = Comm_GetRcvData(CommRcvBuff);
       if (rt > 0)
       {
-        stForce = (ST_R_DATA_GET_F*)CommRcvBuff;
+        stForce = (ST_R_DATA_GET_F *)CommRcvBuff;
 
         sensor_data.force[1] = (double)(stForce->ssForce[0] + (offset.force[1] * -1)) * conversion_factor[0];
         sensor_data.force[2] = (double)(stForce->ssForce[1] + (offset.force[2] * -1)) * conversion_factor[1];
@@ -209,7 +211,7 @@ void LeptrinoNode::App_Init()
 
   // Commポート初期化
   gSys.com_ok = NG;
-  rt = Comm_Open(serial_port.c_str());
+  rt = Comm_Open(serial_port_.c_str());
   if (rt == OK)
   {
     Comm_Setup(460800, PAR_NON, BIT_LEN_8, 0, 0, CHR_ETX);
@@ -227,18 +229,18 @@ void LeptrinoNode::App_Close(rclcpp::Logger logger)
   }
 }
 
-ULONG LeptrinoNode::SendData(UCHAR* pucInput, USHORT usSize)
+ULONG LeptrinoNode::SendData(UCHAR *pucInput, USHORT usSize)
 {
   USHORT usCnt;
   UCHAR ucWork;
   UCHAR ucBCC = 0;
-  UCHAR* pucWrite = &CommSendBuff[0];
+  UCHAR *pucWrite = &CommSendBuff[0];
   USHORT usRealSize;
 
   // データ整形
-  *pucWrite = CHR_DLE;  // DLE
+  *pucWrite = CHR_DLE; // DLE
   pucWrite++;
-  *pucWrite = CHR_STX;  // STX
+  *pucWrite = CHR_STX; // STX
   pucWrite++;
   usRealSize = 2;
 
@@ -246,24 +248,24 @@ ULONG LeptrinoNode::SendData(UCHAR* pucInput, USHORT usSize)
   {
     ucWork = pucInput[usCnt];
     if (ucWork == CHR_DLE)
-    {                       // データが0x10ならば0x10を付加
-      *pucWrite = CHR_DLE;  // DLE付加
-      pucWrite++;           // 書き込み先
-      usRealSize++;         // 実サイズ
+    {                      // データが0x10ならば0x10を付加
+      *pucWrite = CHR_DLE; // DLE付加
+      pucWrite++;          // 書き込み先
+      usRealSize++;        // 実サイズ
       // BCCは計算しない!
     }
-    *pucWrite = ucWork;  // データ
-    ucBCC ^= ucWork;     // BCC
-    pucWrite++;          // 書き込み先
-    usRealSize++;        // 実サイズ
+    *pucWrite = ucWork; // データ
+    ucBCC ^= ucWork;    // BCC
+    pucWrite++;         // 書き込み先
+    usRealSize++;       // 実サイズ
   }
 
-  *pucWrite = CHR_DLE;  // DLE
+  *pucWrite = CHR_DLE; // DLE
   pucWrite++;
-  *pucWrite = CHR_ETX;  // ETX
-  ucBCC ^= CHR_ETX;     // BCC計算
+  *pucWrite = CHR_ETX; // ETX
+  ucBCC ^= CHR_ETX;    // BCC計算
   pucWrite++;
-  *pucWrite = ucBCC;  // BCC付加
+  *pucWrite = ucBCC; // BCC付加
   usRealSize += 3;
 
   Comm_SendData(&CommSendBuff[0], usRealSize);
@@ -276,11 +278,11 @@ void LeptrinoNode::GetProductInfo(rclcpp::Logger logger)
   USHORT len;
 
   RCLCPP_INFO(logger, "Get sensor information");
-  len = 0x04;                 // データ長
-  SendBuff[0] = len;          // レングス
-  SendBuff[1] = 0xFF;         // センサNo.
-  SendBuff[2] = CMD_GET_INF;  // コマンド種別
-  SendBuff[3] = 0;            // 予備
+  len = 0x04;                // データ長
+  SendBuff[0] = len;         // レングス
+  SendBuff[1] = 0xFF;        // センサNo.
+  SendBuff[2] = CMD_GET_INF; // コマンド種別
+  SendBuff[3] = 0;           // 予備
 
   SendData(SendBuff, len);
 }
@@ -291,10 +293,10 @@ void LeptrinoNode::GetLimit(rclcpp::Logger logger)
 
   RCLCPP_INFO(logger, "Get sensor limit");
   len = 0x04;
-  SendBuff[0] = len;            // レングス length
-  SendBuff[1] = 0xFF;           // センサNo. Sensor no.
-  SendBuff[2] = CMD_GET_LIMIT;  // コマンド種別 Command type
-  SendBuff[3] = 0;              // 予備 reserve
+  SendBuff[0] = len;           // レングス length
+  SendBuff[1] = 0xFF;          // センサNo. Sensor no.
+  SendBuff[2] = CMD_GET_LIMIT; // コマンド種別 Command type
+  SendBuff[3] = 0;             // 予備 reserve
 
   SendData(SendBuff, len);
 
@@ -303,14 +305,14 @@ void LeptrinoNode::GetLimit(rclcpp::Logger logger)
     Comm_Rcv();
 
     if (Comm_CheckRcv() != 0)
-    {  //受信データ有
+    { // 受信データ有
       CommRcvBuff[0] = 0;
 
       auto rt = Comm_GetRcvData(CommRcvBuff);
 
       if (rt > 0)
       {
-        stGetLimit = (ST_R_LEP_GET_LIMIT*)CommRcvBuff;
+        stGetLimit = (ST_R_LEP_GET_LIMIT *)CommRcvBuff;
         for (int i = 0; i < FN_Num; i++)
         {
           RCLCPP_INFO(logger, "\tLimit[%d]: %f", i, stGetLimit->fLimit[i]);
@@ -328,11 +330,11 @@ void LeptrinoNode::SerialStart(rclcpp::Logger logger)
   USHORT len;
 
   RCLCPP_INFO(logger, "Start sensor");
-  len = 0x04;                    // データ長
-  SendBuff[0] = len;             // レングス
-  SendBuff[1] = 0xFF;            // センサNo.
-  SendBuff[2] = CMD_DATA_START;  // コマンド種別
-  SendBuff[3] = 0;               // 予備
+  len = 0x04;                   // データ長
+  SendBuff[0] = len;            // レングス
+  SendBuff[1] = 0xFF;           // センサNo.
+  SendBuff[2] = CMD_DATA_START; // コマンド種別
+  SendBuff[3] = 0;              // 予備
 
   SendData(SendBuff, len);
 }
@@ -342,11 +344,11 @@ void LeptrinoNode::SerialStop(rclcpp::Logger logger)
   USHORT len;
 
   RCLCPP_INFO(logger, "Stop sensor\n");
-  len = 0x04;                   // データ長
-  SendBuff[0] = len;            // レングス
-  SendBuff[1] = 0xFF;           // センサNo.
-  SendBuff[2] = CMD_DATA_STOP;  // コマンド種別
-  SendBuff[3] = 0;              // 予備
+  len = 0x04;                  // データ長
+  SendBuff[0] = len;           // レングス
+  SendBuff[1] = 0xFF;          // センサNo.
+  SendBuff[2] = CMD_DATA_STOP; // コマンド種別
+  SendBuff[3] = 0;             // 予備
 
   SendData(SendBuff, len);
 }
@@ -368,7 +370,7 @@ void LeptrinoNode::SensorNormalize(rclcpp::Logger logger)
       auto rt = Comm_GetRcvData(CommRcvBuff);
       if (rt > 0)
       {
-        grossForce = (ST_R_DATA_GET_F*)CommRcvBuff;
+        grossForce = (ST_R_DATA_GET_F *)CommRcvBuff;
         if (DEBUG)
         {
           RCLCPP_INFO(logger, "Normalizing: %d,%d,%d,%d,%d,%d", grossForce->ssForce[0], grossForce->ssForce[1],
@@ -393,7 +395,7 @@ void LeptrinoNode::SensorNormalize(rclcpp::Logger logger)
   RCLCPP_INFO(logger, "Normalizing done\n");
 }
 
-int main(int argc, char** argv)
+int main(int argc, char **argv)
 {
   rclcpp::init(argc, argv);
   rclcpp::spin(std::make_shared<LeptrinoNode>());
