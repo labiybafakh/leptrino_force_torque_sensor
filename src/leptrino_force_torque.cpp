@@ -29,21 +29,23 @@ SOFTWARE.
 #include <vector>
 #include <array>
 
-#include "leptirno_force_torque.hpp"
+#include "rclcpp/rclcpp.hpp"
+#include "leptrino_force_torque.hpp"
 
-#define PRG_VER "Ver 2.0.0"
+#define PRG_VER "Ver 2.1.0"
 
-//Debug calibration and output sensor
-#define DEBUG 1
+// Debug calibration and output sensor
+#define DEBUG 0
 
-//to calibrate the offset of sensor 
+// to calibrate the offset of sensor
 #define Calibration 1
 
 LeptrinoNode::LeptrinoNode() : Node("Leptrino")
 {
-  wrench_pub_ = this->create_publisher<geometry_msgs::msg::WrenchStamped>("leptrino_force_torque", 5);
+  wrench_pub_ = this->create_publisher<geometry_msgs::msg::WrenchStamped>("leptrino", 5);
 
-  this->declare_parameter("com_port");
+  this->declare_parameter("com_port", "/dev/ttyUSB0");
+
   serial_port = this->get_parameter("com_port");
 
   if (!this->get_parameter("com_port", serial_port))
@@ -65,15 +67,14 @@ LeptrinoNode::LeptrinoNode() : Node("Leptrino")
   }
   else
   {
-
     RCLCPP_INFO(this->get_logger(), "Leptrino is connected");
-    rclcpp::sleep_for(10ms);
+    rclcpp::sleep_for(100ms);
     LeptrinoNode::GetLimit(this->get_logger());
-    rclcpp::sleep_for(10ms);
+    rclcpp::sleep_for(100ms);
     LeptrinoNode::SerialStart(this->get_logger());
-    rclcpp::sleep_for(10ms);
-    LeptrinoNode::SensorNormalize(this->get_logger());
-    rclcpp::sleep_for(10ms);
+    rclcpp::sleep_for(100ms);
+    LeptrinoNode::SensorCalibration(this->get_logger());
+    rclcpp::sleep_for(100ms);
 
     timer_acquisition_ = this->create_wall_timer(1ms, std::bind(&LeptrinoNode::SensorCallback, this));
     timer_publisher_ = this->create_wall_timer(1ms, std::bind(&LeptrinoNode::PublisherCallback, this));
@@ -89,7 +90,7 @@ LeptrinoNode::~LeptrinoNode()
 
 void LeptrinoNode::init(rclcpp::Logger logger)
 {
-  LeptrinoNode::SensorNormalize(logger);
+  LeptrinoNode::SensorCalibration(logger);
 }
 
 void LeptrinoNode::PublisherCallback()
@@ -124,23 +125,20 @@ void LeptrinoNode::SensorCallback()
       auto rt = Comm_GetRcvData(CommRcvBuff);
       if (rt > 0)
       {
-        stForce = (ST_R_DATA_GET_F *)CommRcvBuff;
+        stForce = (ST_R_DATA_GET_F*)CommRcvBuff;
 
-        sensor_data.force[1] = (double)(stForce->ssForce[0] + (offset.force[1] * -1)) * conversion_factor[0];
-        sensor_data.force[2] = (double)(stForce->ssForce[1] + (offset.force[2] * -1)) * conversion_factor[1];
-        sensor_data.force[3] = (double)(stForce->ssForce[2] + (offset.force[3] * -1)) * conversion_factor[2];
-        sensor_data.moment[1] = (double)(stForce->ssForce[3] + (offset.moment[1] * -1)) * conversion_factor[3];
-        sensor_data.moment[2] = (double)(stForce->ssForce[4] + (offset.moment[2] * -1)) * conversion_factor[4];
-        sensor_data.moment[3] = (double)(stForce->ssForce[5] + (offset.moment[3] * -1)) * conversion_factor[5];
+        sensor_data.force[1] = (double)(stForce->ssForce[0] * conversion_factor[0]) + (offset.force[1] * -1);
+        sensor_data.force[2] = (double)(stForce->ssForce[1] * conversion_factor[1]) + (offset.force[2] * -1);
+        sensor_data.force[3] = (double)(stForce->ssForce[2] * conversion_factor[2]) + (offset.force[3] * -1);
+        sensor_data.moment[1] = (double)(stForce->ssForce[3] * conversion_factor[3]) + (offset.moment[1] * -1);
+        sensor_data.moment[2] = (double)(stForce->ssForce[4] * conversion_factor[4]) + (offset.moment[2] * -1);
+        sensor_data.moment[3] = (double)(stForce->ssForce[5] * conversion_factor[5]) + (offset.moment[3] * -1);
 
         if (DEBUG)
         {
           RCLCPP_INFO(this->get_logger(), "Output: %f,%f,%f,%f,%f,%f", sensor_data.force[1], sensor_data.force[2],
                       sensor_data.force[3], sensor_data.moment[1], sensor_data.moment[2], sensor_data.moment[3]);
         }
-
-        RCLCPP_INFO_ONCE(this->get_logger(), "Output: %f,%f,%f,%f,%f,%f", sensor_data.force[1], sensor_data.force[2],
-                         sensor_data.force[3], sensor_data.moment[1], sensor_data.moment[2], sensor_data.moment[3]);
       }
     }
   }
@@ -170,18 +168,18 @@ void LeptrinoNode::App_Close(rclcpp::Logger logger)
   }
 }
 
-ULONG LeptrinoNode::SendData(UCHAR *pucInput, USHORT usSize)
+ULONG LeptrinoNode::SendData(UCHAR* pucInput, USHORT usSize)
 {
   USHORT usCnt;
   UCHAR ucWork;
   UCHAR ucBCC = 0;
-  UCHAR *pucWrite = &CommSendBuff[0];
+  UCHAR* pucWrite = &CommSendBuff[0];
   USHORT usRealSize;
 
   // データ整形
-  *pucWrite = CHR_DLE; // DLE
+  *pucWrite = CHR_DLE;  // DLE
   pucWrite++;
-  *pucWrite = CHR_STX; // STX
+  *pucWrite = CHR_STX;  // STX
   pucWrite++;
   usRealSize = 2;
 
@@ -189,24 +187,24 @@ ULONG LeptrinoNode::SendData(UCHAR *pucInput, USHORT usSize)
   {
     ucWork = pucInput[usCnt];
     if (ucWork == CHR_DLE)
-    {                      // データが0x10ならば0x10を付加
-      *pucWrite = CHR_DLE; // DLE付加
-      pucWrite++;          // 書き込み先
-      usRealSize++;        // 実サイズ
+    {                       // データが0x10ならば0x10を付加
+      *pucWrite = CHR_DLE;  // DLE付加
+      pucWrite++;           // 書き込み先
+      usRealSize++;         // 実サイズ
       // BCCは計算しない!
     }
-    *pucWrite = ucWork; // データ
-    ucBCC ^= ucWork;    // BCC
-    pucWrite++;         // 書き込み先
-    usRealSize++;       // 実サイズ
+    *pucWrite = ucWork;  // データ
+    ucBCC ^= ucWork;     // BCC
+    pucWrite++;          // 書き込み先
+    usRealSize++;        // 実サイズ
   }
 
-  *pucWrite = CHR_DLE; // DLE
+  *pucWrite = CHR_DLE;  // DLE
   pucWrite++;
-  *pucWrite = CHR_ETX; // ETX
-  ucBCC ^= CHR_ETX;    // BCC計算
+  *pucWrite = CHR_ETX;  // ETX
+  ucBCC ^= CHR_ETX;     // BCC計算
   pucWrite++;
-  *pucWrite = ucBCC; // BCC付加
+  *pucWrite = ucBCC;  // BCC付加
   usRealSize += 3;
 
   Comm_SendData(&CommSendBuff[0], usRealSize);
@@ -219,11 +217,11 @@ void LeptrinoNode::GetProductInfo(rclcpp::Logger logger)
   USHORT len;
 
   RCLCPP_INFO(logger, "Get sensor information");
-  len = 0x04;                // データ長
-  SendBuff[0] = len;         // レングス
-  SendBuff[1] = 0xFF;        // センサNo.
-  SendBuff[2] = CMD_GET_INF; // コマンド種別
-  SendBuff[3] = 0;           // 予備
+  len = 0x04;                 // データ長
+  SendBuff[0] = len;          // レングス
+  SendBuff[1] = 0xFF;         // センサNo.
+  SendBuff[2] = CMD_GET_INF;  // コマンド種別
+  SendBuff[3] = 0;            // 予備
 
   SendData(SendBuff, len);
 }
@@ -234,10 +232,10 @@ void LeptrinoNode::GetLimit(rclcpp::Logger logger)
 
   RCLCPP_INFO(logger, "Get sensor limit");
   len = 0x04;
-  SendBuff[0] = len;           // レングス length
-  SendBuff[1] = 0xFF;          // センサNo. Sensor no.
-  SendBuff[2] = CMD_GET_LIMIT; // コマンド種別 Command type
-  SendBuff[3] = 0;             // 予備 reserve
+  SendBuff[0] = len;            // レングス length
+  SendBuff[1] = 0xFF;           // センサNo. Sensor no.
+  SendBuff[2] = CMD_GET_LIMIT;  // コマンド種別 Command type
+  SendBuff[3] = 0;              // 予備 reserve
 
   SendData(SendBuff, len);
 
@@ -246,14 +244,14 @@ void LeptrinoNode::GetLimit(rclcpp::Logger logger)
     Comm_Rcv();
 
     if (Comm_CheckRcv() != 0)
-    { // 受信データ有
+    {  // 受信データ有
       CommRcvBuff[0] = 0;
 
       auto rt = Comm_GetRcvData(CommRcvBuff);
 
       if (rt > 0)
       {
-        stGetLimit = (ST_R_LEP_GET_LIMIT *)CommRcvBuff;
+        stGetLimit = (ST_R_LEP_GET_LIMIT*)CommRcvBuff;
         for (int i = 0; i < FN_Num; i++)
         {
           RCLCPP_INFO(logger, "\tLimit[%d]: %f", i, stGetLimit->fLimit[i]);
@@ -271,11 +269,11 @@ void LeptrinoNode::SerialStart(rclcpp::Logger logger)
   USHORT len;
 
   RCLCPP_INFO(logger, "Start sensor");
-  len = 0x04;                   // データ長
-  SendBuff[0] = len;            // レングス
-  SendBuff[1] = 0xFF;           // センサNo.
-  SendBuff[2] = CMD_DATA_START; // コマンド種別
-  SendBuff[3] = 0;              // 予備
+  len = 0x04;                    // データ長
+  SendBuff[0] = len;             // レングス
+  SendBuff[1] = 0xFF;            // センサNo.
+  SendBuff[2] = CMD_DATA_START;  // コマンド種別
+  SendBuff[3] = 0;               // 予備
 
   SendData(SendBuff, len);
 }
@@ -285,20 +283,27 @@ void LeptrinoNode::SerialStop(rclcpp::Logger logger)
   USHORT len;
 
   RCLCPP_INFO(logger, "Stop sensor\n");
-  len = 0x04;                  // データ長
-  SendBuff[0] = len;           // レングス
-  SendBuff[1] = 0xFF;          // センサNo.
-  SendBuff[2] = CMD_DATA_STOP; // コマンド種別
-  SendBuff[3] = 0;             // 予備
+  len = 0x04;                   // データ長
+  SendBuff[0] = len;            // レングス
+  SendBuff[1] = 0xFF;           // センサNo.
+  SendBuff[2] = CMD_DATA_STOP;  // コマンド種別
+  SendBuff[3] = 0;              // 予備
 
   SendData(SendBuff, len);
 }
 
-void LeptrinoNode::SensorNormalize(rclcpp::Logger logger)
+void LeptrinoNode::SensorCalibration(rclcpp::Logger logger)
 {
-  RCLCPP_INFO(logger, "Normalizing sensor data\n");
+  RCLCPP_INFO(logger, "Calibrating sensor data\n");
   int counter = 0;
-  int max_counter = 100;
+  const int max_counter = 100;
+  double gain = 1.0 / (double)max_counter;
+
+  offset.force = { 0, 0, 0 };
+  offset.moment = { 0, 0, 0 };
+
+  double temp_fx[max_counter], temp_fy[max_counter], temp_fz[max_counter];
+  double temp_mx[max_counter], temp_my[max_counter], temp_mz[max_counter];
 
   while (counter < max_counter && rclcpp::ok())
   {
@@ -311,32 +316,54 @@ void LeptrinoNode::SensorNormalize(rclcpp::Logger logger)
       auto rt = Comm_GetRcvData(CommRcvBuff);
       if (rt > 0)
       {
-        grossForce = (ST_R_DATA_GET_F *)CommRcvBuff;
+        grossForce = (ST_R_DATA_GET_F*)CommRcvBuff;
+
+        temp_fx[counter] = std::isnan(grossForce->ssForce[0]) ? 0: (double)(grossForce->ssForce[0] * conversion_factor[0]);
+        temp_fy[counter] = std::isnan(grossForce->ssForce[1]) ? 0: (double)(grossForce->ssForce[1] * conversion_factor[1]);
+        temp_fz[counter] = std::isnan(grossForce->ssForce[2]) ? 0: (double)(grossForce->ssForce[2] * conversion_factor[2]);
+
+        temp_mx[counter] = std::isnan(grossForce->ssForce[3]) ? 0: (double)(grossForce->ssForce[3] * conversion_factor[3]);
+        temp_my[counter] = std::isnan(grossForce->ssForce[4]) ? 0: (double)(grossForce->ssForce[4] * conversion_factor[4]);
+        temp_mz[counter] = std::isnan(grossForce->ssForce[5]) ? 0: (double)(grossForce->ssForce[5] * conversion_factor[5]);
+
         if (DEBUG)
         {
-          RCLCPP_INFO(logger, "Normalizing: %d,%d,%d,%d,%d,%d", grossForce->ssForce[0], grossForce->ssForce[1],
-                      grossForce->ssForce[2], grossForce->ssForce[3], grossForce->ssForce[4], grossForce->ssForce[5]);
+          RCLCPP_INFO(logger, "Calibrating %d: %f,%f,%f,%f,%f,%f", counter, temp_fx[counter], temp_fy[counter],
+                      temp_fz[counter], temp_mx[counter], temp_my[counter], temp_mz[counter]);
         }
-        offset.force[1] += (double)grossForce->ssForce[0] / (double)max_counter;
-        offset.force[2] += (double)grossForce->ssForce[1] / (double)max_counter;
-        offset.force[3] += (double)grossForce->ssForce[2] / (double)max_counter;
-        offset.moment[1] += (double)grossForce->ssForce[3] / (double)max_counter;
-        offset.moment[2] += (double)grossForce->ssForce[4] / (double)max_counter;
-        offset.moment[3] += (double)grossForce->ssForce[5] / (double)max_counter;
+
+        counter++;
+        rclcpp::sleep_for(1ms);
       }
     }
-    counter++;
-    rclcpp::sleep_for(1ms);
-    // usleep(1000);
   }
 
-  RCLCPP_INFO(logger, "Offset-> Fx:%f, Fy:%f, Fx:%f, Mx:%f, My:%f, Mz:%f", offset.force[1], offset.force[2],
+  for (int inc = 0; inc < max_counter; inc++)
+  {
+    offset.force[1] += temp_fx[inc];
+    offset.force[2] += temp_fy[inc];
+    offset.force[3] += temp_fz[inc];
+
+    offset.moment[1] += temp_mx[inc];
+    offset.moment[2] += temp_my[inc];
+    offset.moment[3] += temp_mz[inc];
+  }
+
+  offset.force[1] = offset.force[1] / max_counter;
+  offset.force[2] = offset.force[2] / max_counter;
+  offset.force[3] = offset.force[3] / max_counter;
+
+  offset.moment[1] = offset.moment[1] / max_counter;
+  offset.moment[2] = offset.moment[2] / max_counter;
+  offset.moment[3] = offset.moment[3] / max_counter;
+
+  RCLCPP_INFO(logger, "Offset-> Fx:%.3f, Fy:%.3f, Fz:%.3f, Mx:%.3f, My:%.3f, Mz:%.3f", offset.force[1], offset.force[2],
               offset.force[3], offset.moment[1], offset.moment[2], offset.moment[3]);
 
-  RCLCPP_INFO(logger, "Normalizing done\n");
+  RCLCPP_INFO(logger, "Calibrating done\n");
 }
 
-int main(int argc, char **argv)
+int main(int argc, char** argv)
 {
   rclcpp::init(argc, argv);
   rclcpp::spin(std::make_shared<LeptrinoNode>());

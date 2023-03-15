@@ -1,3 +1,4 @@
+#ifndef LEPTRINO_FORCE_TORQUE_HPP
 /*
 MIT License
 
@@ -92,5 +93,8 @@ public:
   ~LeptrinoNode();
   void SensorCallback();
   void init(rclcpp::Logger logger);
-  void SensorNormalize(rclcpp::Logger logger);
+  void SensorCalibration(rclcpp::Logger logger);
 };
+
+
+#endif

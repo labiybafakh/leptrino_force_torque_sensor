@@ -11,7 +11,7 @@ project(leptrino_force_torque)
 #   set(CMAKE_CXX_STANDARD 14)
 # endif()
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 
 
 
