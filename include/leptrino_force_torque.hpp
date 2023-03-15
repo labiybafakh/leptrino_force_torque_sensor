@@ -79,6 +79,8 @@ private:
   void PublisherCallback();
 
   rclcpp::Parameter serial_port;
+  bool check_nan_=false;
+  bool check_zero_=false;
 
 public:
   ST_R_DATA_GET_F *stForce;
