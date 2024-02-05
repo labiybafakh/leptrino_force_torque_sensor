@@ -2,9 +2,9 @@
 
   on:
     push:
-      branches: [ main ]
+      branches: [ ros2 ]
     pull_request:
-      branches: [ main ]
+      branches: [ ros2 ]
 
   jobs:
     build_and_test:
