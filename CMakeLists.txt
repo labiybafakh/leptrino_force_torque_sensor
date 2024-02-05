@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.5)
-project(leptrino_force_torque)
+project(leptrino_force_torque_sensor)
 
 # # Default to C99
 # if(NOT CMAKE_C_STANDARD)

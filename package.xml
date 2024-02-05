@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <package>
-  <name>leptrino_force_torque</name>
+  <name>leptrino_force_torque_sensor</name>
   <version>1.0.0</version>
   <description>The leptrino_force_torque package</description>
 
