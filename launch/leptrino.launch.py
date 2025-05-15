@@ -13,8 +13,8 @@ def generate_launch_description():
 
     # Create the 'leptrino_node' node
     leptrino_node = Node(
-        package='leptrino_force_torque',
-        executable='leptrino_force_torque',
+        package='leptrino_force_torque_sensor',
+        executable='leptrino_force_torque_sensor',
         parameters=[{'com_port': com_port_param}],
         output='screen'
     )
