@@ -21,5 +21,6 @@ colcon build
 ### 2. How to lunch
 ```bash
 source install/local_setup.bash
-ros2 launch leptrino_force_torque leptrino.launch.py 
+sudo chmod 666 /dev/ttyACM0
+ros2 launch leptrino_force_torque_sensor leptrino.launch.py 
 ```
