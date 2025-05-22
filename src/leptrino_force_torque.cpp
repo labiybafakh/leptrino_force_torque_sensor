@@ -471,7 +471,7 @@ void LeptrinoNode::SensorCalibration(rclcpp::Logger logger)
 
 void LeptrinoNode::RecalibrateService(
   const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
-  const std::shared_ptr<std_srvs::srv::Trigger::Response> response)
+  std::shared_ptr<std_srvs::srv::Trigger::Response> response)
 {
   RCLCPP_INFO(this->get_logger(), "Recalibration service called");
   
