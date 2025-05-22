@@ -1,3 +1,9 @@
 Leptrino:
   ros_parameters:
-    com_port:"/dev/ttyACM0"
+    # Hardware connection
+    com_port: "/dev/ttyACM0"
+    
+    # Recalibration settings
+    auto_recalibration_enabled: false          # Enable automatic recalibration
+    auto_recalibration_interval_minutes: 30.0  # Interval between auto-recalibrations (minutes)
+    calibration_samples: 100                   # Number of samples for calibration

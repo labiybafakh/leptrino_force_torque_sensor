@@ -28,9 +28,13 @@ SOFTWARE.
 #include <unistd.h>
 #include <vector>
 #include <array>
+#include <mutex>
 
 #include "rclcpp/rclcpp.hpp"
 #include "leptrino_force_torque.hpp"
+#include "std_msgs/msg/bool.hpp"
+#include "std_msgs/msg/empty.hpp"
+#include "std_srvs/srv/trigger.hpp"
 
 #define PRG_VER "Ver 2.1.0"
 
@@ -40,11 +44,24 @@ SOFTWARE.
 // to calibrate the offset of sensor
 #define Calibration 1
 
-LeptrinoNode::LeptrinoNode() : Node("Leptrino")
+LeptrinoNode::LeptrinoNode() : Node("Leptrino"), is_calibrating_(false)
 {
   wrench_pub_ = this->create_publisher<geometry_msgs::msg::WrenchStamped>("leptrino", 5);
 
+  calibration_status_pub_ = this->create_publisher<std_msgs::msg::Bool>("leptrino/calibration_status", 5);
+
+  recalibrate_service_ = this->create_service<std_srvs::srv::Trigger>(
+    "leptrino/recalibrate",
+    std::bind(&LeptrinoNode::RecalibrateService, this, std::placeholders::_1, std::placeholders::_2));
+
+  recalibrate_sub_ = this->create_subscription<std_msgs::msg::Empty>(
+    "leptrino/recalibrate_trigger", 10,
+    std::bind(&LeptrinoNode::RecalibrateTopic, this, std::placeholders::_1));
+
   this->declare_parameter("com_port", "/dev/ttyUSB0");
+  this->declare_parameter("auto_recalibration_enabled", false);
+  this->declare_parameter("auto_recalibration_interval_minutes", 30.0);
+  this->declare_parameter("calibration_samples", 100);
 
   serial_port = this->get_parameter("com_port");
 
@@ -56,6 +73,21 @@ LeptrinoNode::LeptrinoNode() : Node("Leptrino")
   {
     serial_port_ = serial_port.as_string();
     RCLCPP_INFO(this->get_logger(), "Using serial port: %s", serial_port_.c_str());
+  }
+
+  auto_recalibration_enabled_ = this->get_parameter("auto_recalibration_enabled").as_bool();
+  auto_recalibration_interval_minutes_ = this->get_parameter("auto_recalibration_interval_minutes").as_double();
+  calibration_samples_ = this->get_parameter("calibration_samples").as_int();
+
+  if (auto_recalibration_enabled_)
+  {
+    auto interval = std::chrono::duration<double, std::milli>(auto_recalibration_interval_minutes_ * 60 * 1000);
+    timer_auto_recalibration_ = this->create_wall_timer(
+      interval, std::bind(&LeptrinoNode::AutoRecalibrateCallback, this));
+    
+    RCLCPP_INFO(this->get_logger(), 
+      "Auto-recalibration enabled with interval: %.1f minutes", 
+      auto_recalibration_interval_minutes_);
   }
 
   LeptrinoNode::init(this->get_logger());
@@ -435,6 +467,158 @@ void LeptrinoNode::SensorCalibration(rclcpp::Logger logger)
               offset.force[3], offset.moment[1], offset.moment[2], offset.moment[3]);
 
   RCLCPP_INFO(logger, "Calibrating done\n");
+}
+
+void LeptrinoNode::RecalibrateService(
+  const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
+  const std::shared_ptr<std_srvs::srv::Trigger::Response> response)
+{
+  RCLCPP_INFO(this->get_logger(), "Recalibration service called");
+  
+  if (is_calibrating_)
+  {
+    response->success = false;
+    response->message = "Calibration already in progress";
+    return;
+  }
+
+  bool success = PerformRecalibration();
+  response->success = success;
+  response->message = success ? "Recalibration completed successfully" : "Recalibration failed";
+}
+
+void LeptrinoNode::RecalibrateTopic(const std_msgs::msg::Empty::SharedPtr /* msg */)
+{
+  RCLCPP_INFO(this->get_logger(), "Recalibration topic triggered");
+  
+  if (!is_calibrating_)
+  {
+    PerformRecalibration();
+  }
+  else
+  {
+    RCLCPP_WARN(this->get_logger(), "Calibration already in progress, ignoring trigger");
+  }
+}
+
+void LeptrinoNode::AutoRecalibrateCallback()
+{
+  RCLCPP_INFO(this->get_logger(), "Auto-recalibration triggered");
+  
+  if (!is_calibrating_)
+  {
+    PerformRecalibration();
+  }
+  else
+  {
+    RCLCPP_WARN(this->get_logger(), "Calibration already in progress, skipping auto-recalibration");
+  }
+}
+
+bool LeptrinoNode::PerformRecalibration()
+{
+  std::lock_guard<std::mutex> lock(calibration_mutex_);
+  
+  if (is_calibrating_)
+  {
+    return false;
+  }
+
+  is_calibrating_ = true;
+  PublishCalibrationStatus(true);
+
+  RCLCPP_INFO(this->get_logger(), "Starting sensor recalibration...");
+  
+  // Reset offset values
+  offset.force[1] = 0.0;
+  offset.force[2] = 0.0;
+  offset.force[3] = 0.0;
+  offset.moment[1] = 0.0;
+  offset.moment[2] = 0.0;
+  offset.moment[3] = 0.0;
+
+  int counter = 0;
+  std::vector<double> temp_fx(calibration_samples_);
+  std::vector<double> temp_fy(calibration_samples_);
+  std::vector<double> temp_fz(calibration_samples_);
+  std::vector<double> temp_mx(calibration_samples_);
+  std::vector<double> temp_my(calibration_samples_);
+  std::vector<double> temp_mz(calibration_samples_);
+
+  while (counter < calibration_samples_ && rclcpp::ok())
+  {
+    Comm_Rcv();
+
+    if (Comm_CheckRcv() != 0)
+    {
+      memset(CommRcvBuff, 0, sizeof(CommRcvBuff));
+
+      auto rt = Comm_GetRcvData(CommRcvBuff);
+      if (rt > 0)
+      {
+        grossForce = (ST_R_DATA_GET_F*)CommRcvBuff;
+        bool has_nan = false;
+
+        for (const auto& force_val : grossForce->ssForce)
+        {
+          if (std::isnan(force_val))
+          {
+            has_nan = true;
+            break;
+          }
+        }
+        
+        if (!has_nan)
+        {
+          temp_fx[counter] = (double)(grossForce->ssForce[0] * conversion_factor[0]);
+          temp_fy[counter] = (double)(grossForce->ssForce[1] * conversion_factor[1]);
+          temp_fz[counter] = (double)(grossForce->ssForce[2] * conversion_factor[2]);
+          temp_mx[counter] = (double)(grossForce->ssForce[3] * conversion_factor[3]);
+          temp_my[counter] = (double)(grossForce->ssForce[4] * conversion_factor[4]);
+          temp_mz[counter] = (double)(grossForce->ssForce[5] * conversion_factor[5]);
+
+          counter++;
+        }
+
+        rclcpp::sleep_for(1ms);
+      }
+    }
+  }
+
+  // Calculate averages
+  for (int i = 0; i < calibration_samples_; i++)
+  {
+    offset.force[1] += temp_fx[i];
+    offset.force[2] += temp_fy[i];
+    offset.force[3] += temp_fz[i];
+    offset.moment[1] += temp_mx[i];
+    offset.moment[2] += temp_my[i];
+    offset.moment[3] += temp_mz[i];
+  }
+
+  offset.force[1] /= calibration_samples_;
+  offset.force[2] /= calibration_samples_;
+  offset.force[3] /= calibration_samples_;
+  offset.moment[1] /= calibration_samples_;
+  offset.moment[2] /= calibration_samples_;
+  offset.moment[3] /= calibration_samples_;
+
+  RCLCPP_INFO(this->get_logger(), 
+    "Recalibration completed - New offsets: Fx:%.3f, Fy:%.3f, Fz:%.3f, Mx:%.3f, My:%.3f, Mz:%.3f", 
+    offset.force[1], offset.force[2], offset.force[3], 
+    offset.moment[1], offset.moment[2], offset.moment[3]);
+
+  is_calibrating_ = false;
+  PublishCalibrationStatus(false);
+
+  return true;
+}
+
+void LeptrinoNode::PublishCalibrationStatus(bool is_calibrating)
+{
+  auto status_msg = std_msgs::msg::Bool();
+  status_msg.data = is_calibrating;
+  calibration_status_pub_->publish(status_msg);
 }
 
 int main(int argc, char** argv)
