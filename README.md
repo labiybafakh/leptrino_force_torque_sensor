@@ -26,7 +26,7 @@ git clone https://github.com/labiybafakh/leptrino_force_torque_sensor
 ### Compile the package
 ```bash
 cd /path/to/ros2-workspace/
-colcon build --packages-select leptrino_force_torque_sensor
+colcon build --symlink-install --packages-select leptrino_force_torque_sensor --cmake-args -DCMAKE_BUILD_TYPE=Release
 ```
 
 ### Source the workspace
