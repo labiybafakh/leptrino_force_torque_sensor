@@ -22,6 +22,8 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(std_srvs REQUIRED)
+find_package(std_msgs REQUIRED)
 
 #add_library(${PROJECT_NAME} ${SRC_FILES})
 include_directories(include)
@@ -43,7 +45,12 @@ install(TARGETS
   DESTINATION lib/${PROJECT_NAME}
 )
 
-ament_target_dependencies(${PROJECT_NAME} rclcpp geometry_msgs)
+ament_target_dependencies(${PROJECT_NAME} 
+  rclcpp 
+  geometry_msgs 
+  std_srvs 
+  std_msgs
+)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
@@ -54,6 +61,8 @@ if(BUILD_TESTING)
   )
   ament_target_dependencies(${PROJECT_NAME}_test
     geometry_msgs
+    std_srvs
+    std_msgs
   )
 endif()
 

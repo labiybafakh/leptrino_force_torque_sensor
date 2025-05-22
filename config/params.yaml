@@ -1,3 +1,6 @@
-Leptrino:
-  ros_parameters:
-    com_port:"/dev/ttyACM0"
+leptrino_sensor:
+  ros__parameters:
+    com_port: "/dev/ttyACM0"
+    auto_recalibration_enabled: false
+    auto_recalibration_interval_minutes: 30.0
+    calibration_samples: 100

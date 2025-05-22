@@ -29,6 +29,7 @@ SOFTWARE.
 #include <unistd.h>
 #include <vector>
 #include <array>
+#include <mutex>  // Added for thread-safe calibration
 
 #include <leptrino/pCommon.h>
 #include <leptrino/rs_comm.h>
@@ -36,17 +37,33 @@ SOFTWARE.
 
 #include "rclcpp/rclcpp.hpp"
 #include "geometry_msgs/msg/wrench_stamped.hpp"
+// Added new includes for calibration functionality
+#include "std_srvs/srv/trigger.hpp"
+#include "std_msgs/msg/empty.hpp"
+#include "std_msgs/msg/bool.hpp"
 
 
 using namespace std::chrono_literals;
 using std::placeholders::_1;
+using std::placeholders::_2;  // Added for service callbacks
 
 class LeptrinoNode : public rclcpp::Node
 {
 private:
   rclcpp::Publisher<geometry_msgs::msg::WrenchStamped>::SharedPtr wrench_pub_;
+  // Added new publisher for calibration status
+  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr calibration_status_pub_;
+  
+  // Added new subscriber for recalibration
+  rclcpp::Subscription<std_msgs::msg::Empty>::SharedPtr recalibrate_sub_;
+  
+  // Added new service for recalibration
+  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr recalibrate_service_;
+  
   rclcpp::TimerBase::SharedPtr timer_acquisition_;
   rclcpp::TimerBase::SharedPtr timer_publisher_;
+  // Added new timer for auto recalibration
+  rclcpp::TimerBase::SharedPtr timer_auto_recalibration_;
 
   void App_Init();
   void App_Close(rclcpp::Logger logger);
@@ -55,6 +72,14 @@ private:
   void GetLimit(rclcpp::Logger logger);
   void SerialStart(rclcpp::Logger logger);
   void SerialStop(rclcpp::Logger logger);
+  
+  // Added new methods for calibration
+  void RecalibrateService(const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
+                         std::shared_ptr<std_srvs::srv::Trigger::Response> response);
+  void RecalibrateTopic(const std_msgs::msg::Empty::SharedPtr msg);
+  void AutoRecalibrateCallback();
+  bool PerformRecalibration();
+  void PublishCalibrationStatus(bool is_calibrating);
 
   struct ST_SystemInfo
   {
@@ -74,6 +99,13 @@ private:
 
   std::string serial_port_;
   int g_rate = 1000;
+  
+  // Added new variables for calibration
+  bool auto_recalibration_enabled_;
+  double auto_recalibration_interval_minutes_;
+  int calibration_samples_;
+  bool is_calibrating_;
+  std::mutex calibration_mutex_;
 
   void SensorAquistionCallback();
   void PublisherCallback();
